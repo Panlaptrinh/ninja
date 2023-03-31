@@ -1,524 +1,298 @@
-/*
-
-
-
-If you want to know how this game was made, check out this video, that explains how it's made: 
-
-https://youtu.be/eue3UdFvwPo
-
-Follow me on twitter for more: https://twitter.com/HunorBorbely
-
-*/
-
-// Extend the base functionality of JavaScript
-Array.prototype.last = function () {
-  return this[this.length - 1];
-};
-
-// A sinus function that acceps degrees instead of radians
-Math.sinus = function (degree) {
-  return Math.sin((degree / 180) * Math.PI);
-};
-
-// Game data
-let phase = "waiting"; // waiting | stretching | turning | walking | transitioning | falling
-let lastTimestamp; // The timestamp of the previous requestAnimationFrame cycle
-
-let heroX; // Changes when moving forward
-let heroY; // Only changes when falling
-let sceneOffset; // Moves the whole game
-
-let platforms = [];
-let sticks = [];
-let trees = [];
-
-// Todo: Save high score to localStorage (?)
-
-let score = 0;
-
-// Configuration
-const canvasWidth = 375;
-const canvasHeight = 375;
-const platformHeight = 100;
-const heroDistanceFromEdge = 10; // While waiting
-const paddingX = 100; // The waiting position of the hero in from the original canvas size
-const perfectAreaSize = 10;
-
-// The background moves slower than the hero
-const backgroundSpeedMultiplier = 0.2;
-
-const hill1BaseHeight = 100;
-const hill1Amplitude = 10;
-const hill1Stretch = 1;
-const hill2BaseHeight = 70;
-const hill2Amplitude = 20;
-const hill2Stretch = 0.5;
-
-const stretchingSpeed = 4; // Milliseconds it takes to draw a pixel
-const turningSpeed = 4; // Milliseconds it takes to turn a degree
-const walkingSpeed = 4;
-const transitioningSpeed = 2;
-const fallingSpeed = 2;
-
-const heroWidth = 17; // 24
-const heroHeight = 30; // 40
-
-const canvas = document.getElementById("game");
-canvas.width = window.innerWidth; // Make the Canvas full screen
-canvas.height = window.innerHeight;
-
-const ctx = canvas.getContext("2d");
-
-const introductionElement = document.getElementById("introduction");
-const perfectElement = document.getElementById("perfect");
-const restartButton = document.getElementById("restart");
-const scoreElement = document.getElementById("score");
-
-// Initialize layout
-resetGame();
-
-// Resets game variables and layouts but does not start the game (game starts on keypress)
-function resetGame() {
-  // Reset game progress
-  phase = "waiting";
-  lastTimestamp = undefined;
-  sceneOffset = 0;
-  score = 0;
-
-  introductionElement.style.opacity = 1;
-  perfectElement.style.opacity = 0;
-  restartButton.style.display = "none";
-  scoreElement.innerText = score;
-
-  // The first platform is always the same
-  // x + w has to match paddingX
-  platforms = [{ x: 50, w: 50 }];
-  generatePlatform();
-  generatePlatform();
-  generatePlatform();
-  generatePlatform();
-
-  sticks = [{ x: platforms[0].x + platforms[0].w, length: 0, rotation: 0 }];
-
-  trees = [];
-  generateTree();
-  generateTree();
-  generateTree();
-  generateTree();
-  generateTree();
-  generateTree();
-  generateTree();
-  generateTree();
-  generateTree();
-  generateTree();
-
-  heroX = platforms[0].x + platforms[0].w - heroDistanceFromEdge;
-  heroY = 0;
-
-  draw();
-}
-
-function generateTree() {
-  const minimumGap = 30;
-  const maximumGap = 150;
-
-  // X coordinate of the right edge of the furthest tree
-  const lastTree = trees[trees.length - 1];
-  let furthestX = lastTree ? lastTree.x : 0;
-
-  const x =
-    furthestX +
-    minimumGap +
-    Math.floor(Math.random() * (maximumGap - minimumGap));
-
-  const treeColors = ["#6D8821", "#8FAC34", "#98B333"];
-  const color = treeColors[Math.floor(Math.random() * 3)];
-
-  trees.push({ x, color });
-}
-
-function generatePlatform() {
-  const minimumGap = 40;
-  const maximumGap = 200;
-  const minimumWidth = 20;
-  const maximumWidth = 100;
-
-  // X coordinate of the right edge of the furthest platform
-  const lastPlatform = platforms[platforms.length - 1];
-  let furthestX = lastPlatform.x + lastPlatform.w;
-
-  const x =
-    furthestX +
-    minimumGap +
-    Math.floor(Math.random() * (maximumGap - minimumGap));
-  const w =
-    minimumWidth + Math.floor(Math.random() * (maximumWidth - minimumWidth));
-
-  platforms.push({ x, w });
-}
-
-resetGame();
-
-// If space was pressed restart the game
-window.addEventListener("keydown", function (event) {
-  if (event.key == " ") {
-    event.preventDefault();
-    resetGame();
-    return;
-  }
-});
-
-window.addEventListener("mousedown", function (event) {
-  if (phase == "waiting") {
-    lastTimestamp = undefined;
-    introductionElement.style.opacity = 0;
-    phase = "stretching";
-    window.requestAnimationFrame(animate);
-  }
-});
-
-window.addEventListener("mouseup", function (event) {
-  if (phase == "stretching") {
-    phase = "turning";
-  }
-});
-
-window.addEventListener("resize", function (event) {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  draw();
-});
-
-window.requestAnimationFrame(animate);
-
-// The main game loop
-function animate(timestamp) {
-  if (!lastTimestamp) {
-    lastTimestamp = timestamp;
-    window.requestAnimationFrame(animate);
-    return;
-  }
-
-  switch (phase) {
-    case "waiting":
-      return; // Stop the loop
-    case "stretching": {
-      sticks.last().length += (timestamp - lastTimestamp) / stretchingSpeed;
-      break;
-    }
-    case "turning": {
-      sticks.last().rotation += (timestamp - lastTimestamp) / turningSpeed;
-
-      if (sticks.last().rotation > 90) {
-        sticks.last().rotation = 90;
-
-        const [nextPlatform, perfectHit] = thePlatformTheStickHits();
-        if (nextPlatform) {
-          // Increase score
-          score += perfectHit ? 2 : 1;
-          scoreElement.innerText = score;
-
-          if (perfectHit) {
-            perfectElement.style.opacity = 1;
-            setTimeout(() => (perfectElement.style.opacity = 0), 1000);
-          }
-
-          generatePlatform();
-          generateTree();
-          generateTree();
-        }
-
-        phase = "walking";
-      }
-      break;
-    }
-    case "walking": {
-      heroX += (timestamp - lastTimestamp) / walkingSpeed;
-
-      const [nextPlatform] = thePlatformTheStickHits();
-      if (nextPlatform) {
-        // If hero will reach another platform then limit it's position at it's edge
-        const maxHeroX = nextPlatform.x + nextPlatform.w - heroDistanceFromEdge;
-        if (heroX > maxHeroX) {
-          heroX = maxHeroX;
-          phase = "transitioning";
-        }
-      } else {
-        // If hero won't reach another platform then limit it's position at the end of the pole
-        const maxHeroX = sticks.last().x + sticks.last().length + heroWidth;
-        if (heroX > maxHeroX) {
-          heroX = maxHeroX;
-          phase = "falling";
-        }
-      }
-      break;
-    }
-    case "transitioning": {
-      sceneOffset += (timestamp - lastTimestamp) / transitioningSpeed;
-
-      const [nextPlatform] = thePlatformTheStickHits();
-      if (sceneOffset > nextPlatform.x + nextPlatform.w - paddingX) {
-        // Add the next step
-        sticks.push({
-          x: nextPlatform.x + nextPlatform.w,
-          length: 0,
-          rotation: 0
+"use strict";
+console.clear();
+class Stage {
+    constructor() {
+        // container
+        this.render = function () {
+            this.renderer.render(this.scene, this.camera);
+        };
+        this.add = function (elem) {
+            this.scene.add(elem);
+        };
+        this.remove = function (elem) {
+            this.scene.remove(elem);
+        };
+        this.container = document.getElementById('game');
+        // renderer
+        this.renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            alpha: false
         });
-        phase = "waiting";
-      }
-      break;
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.setClearColor('#D0CBC7', 1);
+        this.container.appendChild(this.renderer.domElement);
+        // scene
+        this.scene = new THREE.Scene();
+        // camera
+        let aspect = window.innerWidth / window.innerHeight;
+        let d = 20;
+        this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, -100, 1000);
+        this.camera.position.x = 2;
+        this.camera.position.y = 2;
+        this.camera.position.z = 2;
+        this.camera.lookAt(new THREE.Vector3(0, 0, 0));
+        //light
+        this.light = new THREE.DirectionalLight(0xffffff, 0.5);
+        this.light.position.set(0, 499, 0);
+        this.scene.add(this.light);
+        this.softLight = new THREE.AmbientLight(0xffffff, 0.4);
+        this.scene.add(this.softLight);
+        window.addEventListener('resize', () => this.onResize());
+        this.onResize();
     }
-    case "falling": {
-      if (sticks.last().rotation < 180)
-        sticks.last().rotation += (timestamp - lastTimestamp) / turningSpeed;
-
-      heroY += (timestamp - lastTimestamp) / fallingSpeed;
-      const maxHeroY =
-        platformHeight + 100 + (window.innerHeight - canvasHeight) / 2;
-      if (heroY > maxHeroY) {
-        restartButton.style.display = "block";
-        return;
-      }
-      break;
+    setCamera(y, speed = 0.3) {
+        TweenLite.to(this.camera.position, speed, { y: y + 4, ease: Power1.easeInOut });
+        TweenLite.to(this.camera.lookAt, speed, { y: y, ease: Power1.easeInOut });
     }
-    default:
-      throw Error("Wrong phase");
-  }
-
-  draw();
-  window.requestAnimationFrame(animate);
-
-  lastTimestamp = timestamp;
-}
-
-// Returns the platform the stick hit (if it didn't hit any stick then return undefined)
-function thePlatformTheStickHits() {
-  if (sticks.last().rotation != 90)
-    throw Error(`Stick is ${sticks.last().rotation}°`);
-  const stickFarX = sticks.last().x + sticks.last().length;
-
-  const platformTheStickHits = platforms.find(
-    (platform) => platform.x < stickFarX && stickFarX < platform.x + platform.w
-  );
-
-  // If the stick hits the perfect area
-  if (
-    platformTheStickHits &&
-    platformTheStickHits.x + platformTheStickHits.w / 2 - perfectAreaSize / 2 <
-      stickFarX &&
-    stickFarX <
-      platformTheStickHits.x + platformTheStickHits.w / 2 + perfectAreaSize / 2
-  )
-    return [platformTheStickHits, true];
-
-  return [platformTheStickHits, false];
-}
-
-function draw() {
-  ctx.save();
-  ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
-
-  drawBackground();
-
-  // Center main canvas area to the middle of the screen
-  ctx.translate(
-    (window.innerWidth - canvasWidth) / 2 - sceneOffset,
-    (window.innerHeight - canvasHeight) / 2
-  );
-
-  // Draw scene
-  drawPlatforms();
-  drawHero();
-  drawSticks();
-
-  // Restore transformation
-  ctx.restore();
-}
-
-restartButton.addEventListener("click", function (event) {
-  event.preventDefault();
-  resetGame();
-  restartButton.style.display = "none";
-});
-
-function drawPlatforms() {
-  platforms.forEach(({ x, w }) => {
-    // Draw platform
-    ctx.fillStyle = "black";
-    ctx.fillRect(
-      x,
-      canvasHeight - platformHeight,
-      w,
-      platformHeight + (window.innerHeight - canvasHeight) / 2
-    );
-
-    // Draw perfect area only if hero did not yet reach the platform
-    if (sticks.last().x < x) {
-      ctx.fillStyle = "red";
-      ctx.fillRect(
-        x + w / 2 - perfectAreaSize / 2,
-        canvasHeight - platformHeight,
-        perfectAreaSize,
-        perfectAreaSize
-      );
+    onResize() {
+        let viewSize = 30;
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.camera.left = window.innerWidth / -viewSize;
+        this.camera.right = window.innerWidth / viewSize;
+        this.camera.top = window.innerHeight / viewSize;
+        this.camera.bottom = window.innerHeight / -viewSize;
+        this.camera.updateProjectionMatrix();
     }
-  });
 }
-
-function drawHero() {
-  ctx.save();
-  ctx.fillStyle = "black";
-  ctx.translate(
-    heroX - heroWidth / 2,
-    heroY + canvasHeight - platformHeight - heroHeight / 2
-  );
-
-  // Body
-  drawRoundedRect(
-    -heroWidth / 2,
-    -heroHeight / 2,
-    heroWidth,
-    heroHeight - 4,
-    5
-  );
-
-  // Legs
-  const legDistance = 5;
-  ctx.beginPath();
-  ctx.arc(legDistance, 11.5, 3, 0, Math.PI * 2, false);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(-legDistance, 11.5, 3, 0, Math.PI * 2, false);
-  ctx.fill();
-
-  // Eye
-  ctx.beginPath();
-  ctx.fillStyle = "white";
-  ctx.arc(5, -7, 3, 0, Math.PI * 2, false);
-  ctx.fill();
-
-  // Band
-  ctx.fillStyle = "red";
-  ctx.fillRect(-heroWidth / 2 - 1, -12, heroWidth + 2, 4.5);
-  ctx.beginPath();
-  ctx.moveTo(-9, -14.5);
-  ctx.lineTo(-17, -18.5);
-  ctx.lineTo(-14, -8.5);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(-10, -10.5);
-  ctx.lineTo(-15, -3.5);
-  ctx.lineTo(-5, -7);
-  ctx.fill();
-
-  ctx.restore();
+class Block {
+    constructor(block) {
+        // set size and position
+        this.STATES = { ACTIVE: 'active', STOPPED: 'stopped', MISSED: 'missed' };
+        this.MOVE_AMOUNT = 12;
+        this.dimension = { width: 0, height: 0, depth: 0 };
+        this.position = { x: 0, y: 0, z: 0 };
+        this.targetBlock = block;
+        this.index = (this.targetBlock ? this.targetBlock.index : 0) + 1;
+        this.workingPlane = this.index % 2 ? 'x' : 'z';
+        this.workingDimension = this.index % 2 ? 'width' : 'depth';
+        // set the dimensions from the target block, or defaults.
+        this.dimension.width = this.targetBlock ? this.targetBlock.dimension.width : 10;
+        this.dimension.height = this.targetBlock ? this.targetBlock.dimension.height : 2;
+        this.dimension.depth = this.targetBlock ? this.targetBlock.dimension.depth : 10;
+        this.position.x = this.targetBlock ? this.targetBlock.position.x : 0;
+        this.position.y = this.dimension.height * this.index;
+        this.position.z = this.targetBlock ? this.targetBlock.position.z : 0;
+        this.colorOffset = this.targetBlock ? this.targetBlock.colorOffset : Math.round(Math.random() * 100);
+        // set color
+        if (!this.targetBlock) {
+            this.color = 0x333344;
+        }
+        else {
+            let offset = this.index + this.colorOffset;
+            var r = Math.sin(0.3 * offset) * 55 + 200;
+            var g = Math.sin(0.3 * offset + 2) * 55 + 200;
+            var b = Math.sin(0.3 * offset + 4) * 55 + 200;
+            this.color = new THREE.Color(r / 255, g / 255, b / 255);
+        }
+        // state
+        this.state = this.index > 1 ? this.STATES.ACTIVE : this.STATES.STOPPED;
+        // set direction
+        this.speed = -0.1 - (this.index * 0.005);
+        if (this.speed < -4)
+            this.speed = -4;
+        this.direction = this.speed;
+        // create block
+        let geometry = new THREE.BoxGeometry(this.dimension.width, this.dimension.height, this.dimension.depth);
+        geometry.applyMatrix(new THREE.Matrix4().makeTranslation(this.dimension.width / 2, this.dimension.height / 2, this.dimension.depth / 2));
+        this.material = new THREE.MeshToonMaterial({ color: this.color, shading: THREE.FlatShading });
+        this.mesh = new THREE.Mesh(geometry, this.material);
+        this.mesh.position.set(this.position.x, this.position.y + (this.state == this.STATES.ACTIVE ? 0 : 0), this.position.z);
+        if (this.state == this.STATES.ACTIVE) {
+            this.position[this.workingPlane] = Math.random() > 0.5 ? -this.MOVE_AMOUNT : this.MOVE_AMOUNT;
+        }
+    }
+    reverseDirection() {
+        this.direction = this.direction > 0 ? this.speed : Math.abs(this.speed);
+    }
+    place() {
+        this.state = this.STATES.STOPPED;
+        let overlap = this.targetBlock.dimension[this.workingDimension] - Math.abs(this.position[this.workingPlane] - this.targetBlock.position[this.workingPlane]);
+        let blocksToReturn = {
+            plane: this.workingPlane,
+            direction: this.direction
+        };
+        if (this.dimension[this.workingDimension] - overlap < 0.3) {
+            overlap = this.dimension[this.workingDimension];
+            blocksToReturn.bonus = true;
+            this.position.x = this.targetBlock.position.x;
+            this.position.z = this.targetBlock.position.z;
+            this.dimension.width = this.targetBlock.dimension.width;
+            this.dimension.depth = this.targetBlock.dimension.depth;
+        }
+        if (overlap > 0) {
+            let choppedDimensions = { width: this.dimension.width, height: this.dimension.height, depth: this.dimension.depth };
+            choppedDimensions[this.workingDimension] -= overlap;
+            this.dimension[this.workingDimension] = overlap;
+            let placedGeometry = new THREE.BoxGeometry(this.dimension.width, this.dimension.height, this.dimension.depth);
+            placedGeometry.applyMatrix(new THREE.Matrix4().makeTranslation(this.dimension.width / 2, this.dimension.height / 2, this.dimension.depth / 2));
+            let placedMesh = new THREE.Mesh(placedGeometry, this.material);
+            let choppedGeometry = new THREE.BoxGeometry(choppedDimensions.width, choppedDimensions.height, choppedDimensions.depth);
+            choppedGeometry.applyMatrix(new THREE.Matrix4().makeTranslation(choppedDimensions.width / 2, choppedDimensions.height / 2, choppedDimensions.depth / 2));
+            let choppedMesh = new THREE.Mesh(choppedGeometry, this.material);
+            let choppedPosition = {
+                x: this.position.x,
+                y: this.position.y,
+                z: this.position.z
+            };
+            if (this.position[this.workingPlane] < this.targetBlock.position[this.workingPlane]) {
+                this.position[this.workingPlane] = this.targetBlock.position[this.workingPlane];
+            }
+            else {
+                choppedPosition[this.workingPlane] += overlap;
+            }
+            placedMesh.position.set(this.position.x, this.position.y, this.position.z);
+            choppedMesh.position.set(choppedPosition.x, choppedPosition.y, choppedPosition.z);
+            blocksToReturn.placed = placedMesh;
+            if (!blocksToReturn.bonus)
+                blocksToReturn.chopped = choppedMesh;
+        }
+        else {
+            this.state = this.STATES.MISSED;
+        }
+        this.dimension[this.workingDimension] = overlap;
+        return blocksToReturn;
+    }
+    tick() {
+        if (this.state == this.STATES.ACTIVE) {
+            let value = this.position[this.workingPlane];
+            if (value > this.MOVE_AMOUNT || value < -this.MOVE_AMOUNT)
+                this.reverseDirection();
+            this.position[this.workingPlane] += this.direction;
+            this.mesh.position[this.workingPlane] = this.position[this.workingPlane];
+        }
+    }
 }
-
-function drawRoundedRect(x, y, width, height, radius) {
-  ctx.beginPath();
-  ctx.moveTo(x, y + radius);
-  ctx.lineTo(x, y + height - radius);
-  ctx.arcTo(x, y + height, x + radius, y + height, radius);
-  ctx.lineTo(x + width - radius, y + height);
-  ctx.arcTo(x + width, y + height, x + width, y + height - radius, radius);
-  ctx.lineTo(x + width, y + radius);
-  ctx.arcTo(x + width, y, x + width - radius, y, radius);
-  ctx.lineTo(x + radius, y);
-  ctx.arcTo(x, y, x, y + radius, radius);
-  ctx.fill();
+class Game {
+    constructor() {
+        this.STATES = {
+            'LOADING': 'loading',
+            'PLAYING': 'playing',
+            'READY': 'ready',
+            'ENDED': 'ended',
+            'RESETTING': 'resetting'
+        };
+        this.blocks = [];
+        this.state = this.STATES.LOADING;
+        this.stage = new Stage();
+        this.mainContainer = document.getElementById('container');
+        this.scoreContainer = document.getElementById('score');
+        this.startButton = document.getElementById('start-button');
+        this.instructions = document.getElementById('instructions');
+        this.scoreContainer.innerHTML = '0';
+        this.newBlocks = new THREE.Group();
+        this.placedBlocks = new THREE.Group();
+        this.choppedBlocks = new THREE.Group();
+        this.stage.add(this.newBlocks);
+        this.stage.add(this.placedBlocks);
+        this.stage.add(this.choppedBlocks);
+        this.addBlock();
+        this.tick();
+        this.updateState(this.STATES.READY);
+        document.addEventListener('keydown', e => {
+            if (e.keyCode == 32)
+                this.onAction();
+        });
+        document.addEventListener('click', e => {
+            this.onAction();
+        });
+        document.addEventListener('touchstart', e => {
+            e.preventDefault();
+            // this.onAction();
+            // ☝️ this triggers after click on android so you
+            // insta-lose, will figure it out later.
+        });
+    }
+    updateState(newState) {
+        for (let key in this.STATES)
+            this.mainContainer.classList.remove(this.STATES[key]);
+        this.mainContainer.classList.add(newState);
+        this.state = newState;
+    }
+    onAction() {
+        switch (this.state) {
+            case this.STATES.READY:
+                this.startGame();
+                break;
+            case this.STATES.PLAYING:
+                this.placeBlock();
+                break;
+            case this.STATES.ENDED:
+                this.restartGame();
+                break;
+        }
+    }
+    startGame() {
+        if (this.state != this.STATES.PLAYING) {
+            this.scoreContainer.innerHTML = '0';
+            this.updateState(this.STATES.PLAYING);
+            this.addBlock();
+        }
+    }
+    restartGame() {
+        this.updateState(this.STATES.RESETTING);
+        let oldBlocks = this.placedBlocks.children;
+        let removeSpeed = 0.2;
+        let delayAmount = 0.02;
+        for (let i = 0; i < oldBlocks.length; i++) {
+            TweenLite.to(oldBlocks[i].scale, removeSpeed, { x: 0, y: 0, z: 0, delay: (oldBlocks.length - i) * delayAmount, ease: Power1.easeIn, onComplete: () => this.placedBlocks.remove(oldBlocks[i]) });
+            TweenLite.to(oldBlocks[i].rotation, removeSpeed, { y: 0.5, delay: (oldBlocks.length - i) * delayAmount, ease: Power1.easeIn });
+        }
+        let cameraMoveSpeed = removeSpeed * 2 + (oldBlocks.length * delayAmount);
+        this.stage.setCamera(2, cameraMoveSpeed);
+        let countdown = { value: this.blocks.length - 1 };
+        TweenLite.to(countdown, cameraMoveSpeed, { value: 0, onUpdate: () => { this.scoreContainer.innerHTML = String(Math.round(countdown.value)); } });
+        this.blocks = this.blocks.slice(0, 1);
+        setTimeout(() => {
+            this.startGame();
+        }, cameraMoveSpeed * 1000);
+    }
+    placeBlock() {
+        let currentBlock = this.blocks[this.blocks.length - 1];
+        let newBlocks = currentBlock.place();
+        this.newBlocks.remove(currentBlock.mesh);
+        if (newBlocks.placed)
+            this.placedBlocks.add(newBlocks.placed);
+        if (newBlocks.chopped) {
+            this.choppedBlocks.add(newBlocks.chopped);
+            let positionParams = { y: '-=30', ease: Power1.easeIn, onComplete: () => this.choppedBlocks.remove(newBlocks.chopped) };
+            let rotateRandomness = 10;
+            let rotationParams = {
+                delay: 0.05,
+                x: newBlocks.plane == 'z' ? ((Math.random() * rotateRandomness) - (rotateRandomness / 2)) : 0.1,
+                z: newBlocks.plane == 'x' ? ((Math.random() * rotateRandomness) - (rotateRandomness / 2)) : 0.1,
+                y: Math.random() * 0.1,
+            };
+            if (newBlocks.chopped.position[newBlocks.plane] > newBlocks.placed.position[newBlocks.plane]) {
+                positionParams[newBlocks.plane] = '+=' + (40 * Math.abs(newBlocks.direction));
+            }
+            else {
+                positionParams[newBlocks.plane] = '-=' + (40 * Math.abs(newBlocks.direction));
+            }
+            TweenLite.to(newBlocks.chopped.position, 1, positionParams);
+            TweenLite.to(newBlocks.chopped.rotation, 1, rotationParams);
+        }
+        this.addBlock();
+    }
+    addBlock() {
+        let lastBlock = this.blocks[this.blocks.length - 1];
+        if (lastBlock && lastBlock.state == lastBlock.STATES.MISSED) {
+            return this.endGame();
+        }
+        this.scoreContainer.innerHTML = String(this.blocks.length - 1);
+        let newKidOnTheBlock = new Block(lastBlock);
+        this.newBlocks.add(newKidOnTheBlock.mesh);
+        this.blocks.push(newKidOnTheBlock);
+        this.stage.setCamera(this.blocks.length * 2);
+        if (this.blocks.length >= 5)
+            this.instructions.classList.add('hide');
+    }
+    endGame() {
+        this.updateState(this.STATES.ENDED);
+    }
+    tick() {
+        this.blocks[this.blocks.length - 1].tick();
+        this.stage.render();
+        requestAnimationFrame(() => { this.tick(); });
+    }
 }
-
-function drawSticks() {
-  sticks.forEach((stick) => {
-    ctx.save();
-
-    // Move the anchor point to the start of the stick and rotate
-    ctx.translate(stick.x, canvasHeight - platformHeight);
-    ctx.rotate((Math.PI / 180) * stick.rotation);
-
-    // Draw stick
-    ctx.beginPath();
-    ctx.lineWidth = 2;
-    ctx.moveTo(0, 0);
-    ctx.lineTo(0, -stick.length);
-    ctx.stroke();
-
-    // Restore transformations
-    ctx.restore();
-  });
-}
-
-function drawBackground() {
-  // Draw sky
-  var gradient = ctx.createLinearGradient(0, 0, 0, window.innerHeight);
-  gradient.addColorStop(0, "#BBD691");
-  gradient.addColorStop(1, "#FEF1E1");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
-
-  // Draw hills
-  drawHill(hill1BaseHeight, hill1Amplitude, hill1Stretch, "#95C629");
-  drawHill(hill2BaseHeight, hill2Amplitude, hill2Stretch, "#659F1C");
-
-  // Draw trees
-  trees.forEach((tree) => drawTree(tree.x, tree.color));
-}
-
-// A hill is a shape under a stretched out sinus wave
-function drawHill(baseHeight, amplitude, stretch, color) {
-  ctx.beginPath();
-  ctx.moveTo(0, window.innerHeight);
-  ctx.lineTo(0, getHillY(0, baseHeight, amplitude, stretch));
-  for (let i = 0; i < window.innerWidth; i++) {
-    ctx.lineTo(i, getHillY(i, baseHeight, amplitude, stretch));
-  }
-  ctx.lineTo(window.innerWidth, window.innerHeight);
-  ctx.fillStyle = color;
-  ctx.fill();
-}
-
-function drawTree(x, color) {
-  ctx.save();
-  ctx.translate(
-    (-sceneOffset * backgroundSpeedMultiplier + x) * hill1Stretch,
-    getTreeY(x, hill1BaseHeight, hill1Amplitude)
-  );
-
-  const treeTrunkHeight = 5;
-  const treeTrunkWidth = 2;
-  const treeCrownHeight = 25;
-  const treeCrownWidth = 10;
-
-  // Draw trunk
-  ctx.fillStyle = "#7D833C";
-  ctx.fillRect(
-    -treeTrunkWidth / 2,
-    -treeTrunkHeight,
-    treeTrunkWidth,
-    treeTrunkHeight
-  );
-
-  // Draw crown
-  ctx.beginPath();
-  ctx.moveTo(-treeCrownWidth / 2, -treeTrunkHeight);
-  ctx.lineTo(0, -(treeTrunkHeight + treeCrownHeight));
-  ctx.lineTo(treeCrownWidth / 2, -treeTrunkHeight);
-  ctx.fillStyle = color;
-  ctx.fill();
-
-  ctx.restore();
-}
-
-function getHillY(windowX, baseHeight, amplitude, stretch) {
-  const sineBaseY = window.innerHeight - baseHeight;
-  return (
-    Math.sinus((sceneOffset * backgroundSpeedMultiplier + windowX) * stretch) *
-      amplitude +
-    sineBaseY
-  );
-}
-
-function getTreeY(x, baseHeight, amplitude) {
-  const sineBaseY = window.innerHeight - baseHeight;
-  return Math.sinus(x) * amplitude + sineBaseY;
-}
+let game = new Game();
